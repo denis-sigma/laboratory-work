@@ -6,46 +6,49 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/denis-sigma/laboratory-work/internal/database"
+	domain "github.com/denis-sigma/laboratory-work/internal/domain/trip"
 )
 
 type Service struct {
 	repository TripRepository
-	txManager  database.TxManager
+	txManager  TxManager
+	metrics    Metrics
 }
 
 func NewService(
 	repository TripRepository,
-	txManager database.TxManager,
+	txManager TxManager,
+	metrics Metrics,
 ) *Service {
 	return &Service{
 		repository: repository,
 		txManager:  txManager,
+		metrics:    metrics,
 	}
 }
 
 type CreateTripInput struct {
 	UserID     uuid.UUID
 	DriverID   uuid.UUID
-	StartPoint Coordinates
-	EndPoint   Coordinates
+	StartPoint domain.Coordinates
+	EndPoint   domain.Coordinates
 	Price      int64
 }
 
 func (s *Service) Create(
 	ctx context.Context,
 	input CreateTripInput,
-) (Trip, error) {
+) (domain.Trip, error) {
 	now := time.Now().UTC()
 
-	result := Trip{
+	result := domain.Trip{
 		ID:         uuid.New(),
 		UserID:     input.UserID,
 		DriverID:   input.DriverID,
 		StartPoint: input.StartPoint,
 		EndPoint:   input.EndPoint,
 		Price:      input.Price,
-		Status:     TripStatusActive,
+		Status:     domain.TripStatusActive,
 		StartedAt:  now,
 	}
 
@@ -53,7 +56,11 @@ func (s *Service) Create(
 		return s.repository.Create(txCtx, result)
 	})
 	if err != nil {
-		return Trip{}, err
+		return domain.Trip{}, err
+	}
+
+	if s.metrics != nil {
+		s.metrics.TripsCreated(ctx)
 	}
 
 	return result, nil
@@ -62,15 +69,15 @@ func (s *Service) Create(
 func (s *Service) GetByID(
 	ctx context.Context,
 	id uuid.UUID,
-) (Trip, error) {
+) (domain.Trip, error) {
 	return s.repository.GetByID(ctx, id)
 }
 
 func (s *Service) Finish(
 	ctx context.Context,
 	id uuid.UUID,
-) (Trip, error) {
-	var result Trip
+) (domain.Trip, error) {
+	var result domain.Trip
 
 	err := s.txManager.Do(ctx, func(txCtx context.Context) error {
 		var err error
@@ -84,7 +91,11 @@ func (s *Service) Finish(
 		return err
 	})
 	if err != nil {
-		return Trip{}, err
+		return domain.Trip{}, err
+	}
+
+	if s.metrics != nil {
+		s.metrics.TripsCompleted(ctx)
 	}
 
 	return result, nil

@@ -1,4 +1,4 @@
-package repository
+package trip
 
 import (
 	"context"
@@ -7,12 +7,14 @@ import (
 	"time"
 
 	"github.com/Masterminds/squirrel"
-	"github.com/denis-sigma/laboratory-work/internal/database"
-	"github.com/denis-sigma/laboratory-work/internal/trip"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	domain "github.com/denis-sigma/laboratory-work/internal/domain/trip"
+	"github.com/denis-sigma/laboratory-work/internal/infra/postgres/transaction"
+	usecase "github.com/denis-sigma/laboratory-work/internal/usecase/trip"
 )
 
 type PostgresTripRepository struct {
@@ -33,16 +35,15 @@ func NewPostgresTripRepository(
 	}
 }
 
-var _ trip.TripRepository = (*PostgresTripRepository)(nil)
+var _ usecase.TripRepository = (*PostgresTripRepository)(nil)
 
 func (r *PostgresTripRepository) Create(
 	ctx context.Context,
-	t trip.Trip,
+	t domain.Trip,
 ) error {
-
 	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
-	executor := database.GetExecutor(queryCtx, r.pool)
+	executor := transaction.GetExecutor(queryCtx, r.pool)
 
 	query, args, err := r.builder.
 		Insert("trips").
@@ -79,7 +80,7 @@ func (r *PostgresTripRepository) Create(
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return trip.ErrDriverBusy
+			return domain.ErrDriverBusy
 		}
 
 		return fmt.Errorf("создание поездки: %w", err)
@@ -104,11 +105,10 @@ func (r *PostgresTripRepository) Create(
 func (r *PostgresTripRepository) GetByID(
 	ctx context.Context,
 	id uuid.UUID,
-) (trip.Trip, error) {
-
+) (domain.Trip, error) {
 	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
-	executor := database.GetExecutor(queryCtx, r.pool)
+	executor := transaction.GetExecutor(queryCtx, r.pool)
 
 	query, args, err := r.builder.
 		Select(
@@ -128,10 +128,10 @@ func (r *PostgresTripRepository) GetByID(
 		Where(squirrel.Eq{"id": id}).
 		ToSql()
 	if err != nil {
-		return trip.Trip{}, fmt.Errorf("сборка запроса получения поездки: %w", err)
+		return domain.Trip{}, fmt.Errorf("сборка запроса получения поездки: %w", err)
 	}
 
-	var result trip.Trip
+	var result domain.Trip
 
 	err = executor.QueryRow(queryCtx, query, args...).Scan(
 		&result.ID,
@@ -148,10 +148,10 @@ func (r *PostgresTripRepository) GetByID(
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return trip.Trip{}, trip.ErrTripNotFound
+			return domain.Trip{}, domain.ErrTripNotFound
 		}
 
-		return trip.Trip{}, fmt.Errorf("получение поездки: %w", err)
+		return domain.Trip{}, fmt.Errorf("получение поездки: %w", err)
 	}
 
 	return result, nil
@@ -161,38 +161,46 @@ func (r *PostgresTripRepository) Finish(
 	ctx context.Context,
 	id uuid.UUID,
 	finishedAt time.Time,
-) (trip.Trip, error) {
-
+) (domain.Trip, error) {
 	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
-	executor := database.GetExecutor(queryCtx, r.pool)
+	executor := transaction.GetExecutor(queryCtx, r.pool)
+
+	current, err := r.GetByID(queryCtx, id)
+	if err != nil {
+		return domain.Trip{}, err
+	}
+
+	if err := current.Finish(finishedAt); err != nil {
+		return domain.Trip{}, err
+	}
 
 	query, args, err := r.builder.
 		Update("trips").
-		Set("status", trip.TripStatusCompleted).
-		Set("finished_at", finishedAt).
+		Set("status", current.Status).
+		Set("finished_at", current.FinishedAt).
 		Set("updated_at", finishedAt).
 		Where(squirrel.Eq{
 			"id":     id,
-			"status": trip.TripStatusActive,
+			"status": domain.TripStatusActive,
 		}).
 		ToSql()
 	if err != nil {
-		return trip.Trip{}, fmt.Errorf("сборка запроса завершения поездки: %w", err)
+		return domain.Trip{}, fmt.Errorf("сборка запроса завершения поездки: %w", err)
 	}
 
 	result, err := executor.Exec(queryCtx, query, args...)
 	if err != nil {
-		return trip.Trip{}, fmt.Errorf("завершение поездки: %w", err)
+		return domain.Trip{}, fmt.Errorf("завершение поездки: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {
 		_, err := r.GetByID(queryCtx, id)
-		if errors.Is(err, trip.ErrTripNotFound) {
-			return trip.Trip{}, trip.ErrTripNotFound
+		if errors.Is(err, domain.ErrTripNotFound) {
+			return domain.Trip{}, domain.ErrTripNotFound
 		}
 
-		return trip.Trip{}, trip.ErrTripCompleted
+		return domain.Trip{}, domain.ErrTripCompleted
 	}
 
 	historyQuery, historyArgs, err := r.builder.
@@ -200,20 +208,20 @@ func (r *PostgresTripRepository) Finish(
 		Columns("trip_id", "from_status", "to_status", "reason").
 		Values(
 			id,
-			trip.TripStatusActive,
-			trip.TripStatusCompleted,
+			domain.TripStatusActive,
+			domain.TripStatusCompleted,
 			"поездка завершена",
 		).
 		ToSql()
 	if err != nil {
-		return trip.Trip{}, fmt.Errorf(
+		return domain.Trip{}, fmt.Errorf(
 			"сборка запроса истории завершения поездки: %w",
 			err,
 		)
 	}
 
 	if _, err := executor.Exec(queryCtx, historyQuery, historyArgs...); err != nil {
-		return trip.Trip{}, fmt.Errorf(
+		return domain.Trip{}, fmt.Errorf(
 			"сохранение истории завершения поездки: %w",
 			err,
 		)

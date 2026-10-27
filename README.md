@@ -120,3 +120,80 @@ make generate
 `DATABASE_QUERY_TIMEOUT`, а также таймауты HTTP-сервера:
 `HTTP_READ_TIMEOUT`, `HTTP_READ_HEADER_TIMEOUT`, `HTTP_WRITE_TIMEOUT` и
 `HTTP_IDLE_TIMEOUT`.
+
+## Лабораторная работа 2
+
+### Архитектура
+
+Сервис разделён на слои:
+
+- `internal/domain` — доменные модели и ошибки;
+- `internal/usecase` — бизнес-логика поездок и интерфейсы зависимостей;
+- `internal/repository` — работа с данными поездок;
+- `internal/infra` — PostgreSQL, транзакции, логирование, трассировка и метрики;
+- `internal/transport/http` — HTTP-обработчики, middleware и преобразование ошибок;
+- `internal/container` — сборка зависимостей приложения.
+
+Зависимости создаются в `internal/container`. Бизнес-логика не зависит напрямую
+от PostgreSQL, HTTP и OpenTelemetry.
+
+### HTTP middleware
+
+Middleware подключены в следующем порядке:
+
+```text
+Recover → Tracing → Logging → Metrics → HTTP router
+```
+
+- `Recover` перехватывает `panic` и возвращает `500`;
+- `Tracing` создаёт OpenTelemetry trace для HTTP-запроса;
+- `Logging` записывает метод, путь, статус, длительность, `trace_id` и `span_id`;
+- `Metrics` записывает длительность, количество активных запросов и HTTP-статус.
+
+### Observability
+
+Сервис использует OpenTelemetry:
+
+- трассировки отправляются в Jaeger через OTLP;
+- HTTP-запросы и PostgreSQL-запросы представлены отдельными spans;
+- метрики отправляются в Prometheus через OTel Collector;
+- логи выводятся в JSON-формате через `log/slog`;
+- бизнес-метрики показывают количество созданных и завершённых поездок.
+
+Основные метрики:
+
+```text
+http_server_request_duration_seconds
+http_server_active_requests
+tripgo_trips_created_total
+tripgo_trips_completed_total
+```
+
+Инструменты observability доступны по адресам:
+
+```text
+Jaeger:     http://localhost:22686
+Prometheus: http://localhost:22909
+Grafana:    http://localhost:22300
+```
+
+### Проверка лабораторной работы 2
+
+```bash
+make test
+make test-integration
+make lint
+```
+
+Проверка HTTP-метрик в Prometheus:
+
+```promql
+http_server_request_duration_seconds_count
+```
+
+Проверка бизнес-метрик:
+
+```promql
+tripgo_trips_created_total
+tripgo_trips_completed_total
+```

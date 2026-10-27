@@ -20,4 +20,15 @@ run:
 	go run ./cmd/trip-service
 
 test:
-	go test -race ./...
+	go test -race -cover ./...
+
+.PHONY: test-integration
+
+test-integration:
+	set -a; . ./.env; set +a; \
+	go test -race -tags=integration ./...
+
+.PHONY: lint
+
+lint:
+	golangci-lint run
