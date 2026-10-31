@@ -1,17 +1,20 @@
 package httptransport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/denis-sigma/laboratory-work/internal/generated"
-	"github.com/denis-sigma/laboratory-work/internal/trip"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/denis-sigma/laboratory-work/internal/generated"
+	"github.com/denis-sigma/laboratory-work/internal/trip"
 )
 
 type Handler struct {
@@ -67,12 +70,14 @@ func (h *Handler) CreateTrip(
 	r *http.Request,
 	params api.CreateTripParams,
 ) {
-	var body api.CreateTripJSONRequestBody
+	payload, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Некорректный запрос", "Не удалось прочитать тело запроса")
+		return
+	}
 
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(&body); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
 		writeProblem(
 			w,
 			r,
@@ -81,6 +86,25 @@ func (h *Handler) CreateTrip(
 			"Некорректный запрос",
 			"Тело запроса имеет неверный формат или содержит неизвестное поле",
 		)
+		return
+	}
+
+	if err := validateRequiredCreateTripFields(raw); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Некорректный запрос", err.Error())
+		return
+	}
+
+	var body api.CreateTripJSONRequestBody
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Некорректный запрос", "Тело запроса имеет неверный формат или содержит неизвестное поле")
+		return
+	}
+
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Некорректный запрос", "После объекта запроса обнаружены лишние данные")
 		return
 	}
 
@@ -334,6 +358,31 @@ func validateCreateTrip(body api.TripData) error {
 
 	if body.Price < 0 {
 		return fmt.Errorf("цена не может быть отрицательной")
+	}
+
+	return nil
+}
+
+func validateRequiredCreateTripFields(raw map[string]json.RawMessage) error {
+	for _, field := range []string{"user_id", "driver_id", "start_point", "end_point", "price"} {
+		value, ok := raw[field]
+		if !ok || string(value) == "null" {
+			return fmt.Errorf("поле %s обязательно и не может быть null", field)
+		}
+	}
+
+	for _, field := range []string{"start_point", "end_point"} {
+		var point map[string]json.RawMessage
+		if err := json.Unmarshal(raw[field], &point); err != nil {
+			return fmt.Errorf("поле %s должно быть объектом", field)
+		}
+
+		for _, coordinate := range []string{"latitude", "longitude"} {
+			value, ok := point[coordinate]
+			if !ok || string(value) == "null" {
+				return fmt.Errorf("поле %s.%s обязательно и не может быть null", field, coordinate)
+			}
+		}
 	}
 
 	return nil
