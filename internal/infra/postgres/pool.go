@@ -18,7 +18,9 @@ func NewPool(ctx context.Context, cfg config.DatabaseConfig) (*pgxpool.Pool, err
 	poolConfig.MaxConns = cfg.MaxConns
 	poolConfig.MinConns = cfg.MinConns
 	poolConfig.MaxConnLifetime = cfg.MaxConnLifetime
-	poolConfig.ConnConfig.Tracer = otelpgx.NewTracer()
+	poolConfig.ConnConfig.Tracer = otelpgx.NewTracer(
+		otelpgx.WithMetricOperationName(otelpgx.SQLOperationName),
+	)
 
 	connectCtx, cancel := context.WithTimeout(ctx, cfg.ConnectTimeout)
 	defer cancel()

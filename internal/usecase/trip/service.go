@@ -13,17 +13,24 @@ type Service struct {
 	repository TripRepository
 	txManager  TxManager
 	metrics    Metrics
+	logger     Logger
 }
 
 func NewService(
 	repository TripRepository,
 	txManager TxManager,
 	metrics Metrics,
+	loggers ...Logger,
 ) *Service {
+	var logger Logger
+	if len(loggers) > 0 {
+		logger = loggers[0]
+	}
 	return &Service{
 		repository: repository,
 		txManager:  txManager,
 		metrics:    metrics,
+		logger:     logger,
 	}
 }
 
@@ -62,6 +69,9 @@ func (s *Service) Create(
 	if s.metrics != nil {
 		s.metrics.TripsCreated(ctx)
 	}
+	if s.logger != nil {
+		s.logger.InfoContext(ctx, "поездка создана", "trip_id", result.ID.String())
+	}
 
 	return result, nil
 }
@@ -96,6 +106,9 @@ func (s *Service) Finish(
 
 	if s.metrics != nil {
 		s.metrics.TripsCompleted(ctx)
+	}
+	if s.logger != nil {
+		s.logger.InfoContext(ctx, "поездка завершена", "trip_id", result.ID.String())
 	}
 
 	return result, nil

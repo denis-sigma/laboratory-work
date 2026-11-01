@@ -9,6 +9,10 @@ import (
 	usecase "github.com/denis-sigma/laboratory-work/internal/usecase/trip"
 )
 
+type Readiness interface {
+	Ping(context.Context) error
+}
+
 //go:generate mockgen -source=contract.go -destination=trip_service_mock_test.go -package=httptransport
 type TripService interface {
 	Create(ctx context.Context, input usecase.CreateTripInput) (domain.Trip, error)

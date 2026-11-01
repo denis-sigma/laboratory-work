@@ -1,35 +1,36 @@
 package httptransport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
-
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	domain "github.com/denis-sigma/laboratory-work/internal/domain/trip"
 	"github.com/denis-sigma/laboratory-work/internal/generated"
 	"github.com/denis-sigma/laboratory-work/internal/transport/http/domainerror"
 	usecase "github.com/denis-sigma/laboratory-work/internal/usecase/trip"
+	"github.com/google/uuid"
 )
 
 type Handler struct {
 	api.Unimplemented
-	pool         *pgxpool.Pool
+	readiness    Readiness
 	queryTimeout time.Duration
 	service      TripService
 }
 
 func NewHandler(
-	pool *pgxpool.Pool,
+	readiness Readiness,
 	queryTimeout time.Duration,
 	service TripService,
 ) *Handler {
 	return &Handler{
-		pool:         pool,
+		readiness:    readiness,
 		queryTimeout: queryTimeout,
 		service:      service,
 	}
@@ -51,7 +52,7 @@ func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 	status := api.Ok
 	httpStatus := http.StatusOK
 
-	if err := h.pool.Ping(ctx); err != nil {
+	if err := h.readiness.Ping(ctx); err != nil {
 		status = api.Unavailable
 		httpStatus = http.StatusServiceUnavailable
 	}
@@ -69,12 +70,14 @@ func (h *Handler) CreateTrip(
 	r *http.Request,
 	_ api.CreateTripParams,
 ) {
-	var body api.CreateTripJSONRequestBody
+	payload, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Некорректный запрос", "Не удалось прочитать тело запроса")
+		return
+	}
 
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(&body); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
 		writeProblem(
 			w,
 			r,
@@ -83,6 +86,25 @@ func (h *Handler) CreateTrip(
 			"Некорректный запрос",
 			"Тело запроса имеет неверный формат или содержит неизвестное поле",
 		)
+		return
+	}
+
+	if err := validateRequiredCreateTripFields(raw); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Некорректный запрос", err.Error())
+		return
+	}
+
+	var body api.CreateTripJSONRequestBody
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Некорректный запрос", "Тело запроса имеет неверный формат или содержит неизвестное поле")
+		return
+	}
+
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Некорректный запрос", "После объекта запроса обнаружены лишние данные")
 		return
 	}
 
@@ -284,6 +306,31 @@ func validateCreateTrip(body api.TripData) error {
 
 	if body.Price < 0 {
 		return fmt.Errorf("цена не может быть отрицательной")
+	}
+
+	return nil
+}
+
+func validateRequiredCreateTripFields(raw map[string]json.RawMessage) error {
+	for _, field := range []string{"user_id", "driver_id", "start_point", "end_point", "price"} {
+		value, ok := raw[field]
+		if !ok || string(value) == "null" {
+			return fmt.Errorf("поле %s обязательно и не может быть null", field)
+		}
+	}
+
+	for _, field := range []string{"start_point", "end_point"} {
+		var point map[string]json.RawMessage
+		if err := json.Unmarshal(raw[field], &point); err != nil {
+			return fmt.Errorf("поле %s должно быть объектом", field)
+		}
+
+		for _, coordinate := range []string{"latitude", "longitude"} {
+			value, ok := point[coordinate]
+			if !ok || string(value) == "null" {
+				return fmt.Errorf("поле %s.%s обязательно и не может быть null", field, coordinate)
+			}
+		}
 	}
 
 	return nil

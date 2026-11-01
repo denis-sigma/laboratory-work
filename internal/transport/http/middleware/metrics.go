@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -43,20 +42,18 @@ func Metrics() (func(http.Handler) http.Handler, error) {
 			activeRequests.Add(r.Context(), 1, attributes)
 
 			writer := &statusWriter{ResponseWriter: w}
+			defer func() {
+				if writer.status == 0 {
+					writer.status = http.StatusInternalServerError
+				}
+				activeRequests.Add(r.Context(), -1, attributes)
+				duration.Record(r.Context(), time.Since(start).Seconds(), metric.WithAttributes(
+					attribute.String("http.request.method", r.Method),
+					attribute.String("http.route", route),
+					attribute.Int("http.response.status_code", writer.status),
+				))
+			}()
 			next.ServeHTTP(writer, r)
-
-			durationAttributes := metric.WithAttributes(
-				attribute.String("http.request.method", r.Method),
-				attribute.String("http.route", route),
-				attribute.Int("http.response.status_code", writer.status),
-			)
-
-			activeRequests.Add(r.Context(), -1, attributes)
-			duration.Record(
-				r.Context(),
-				time.Since(start).Seconds(),
-				durationAttributes,
-			)
 		})
 	}, nil
 }
@@ -68,9 +65,7 @@ func routePattern(path string) string {
 		parts[0] == "api" &&
 		parts[1] == "v1" &&
 		parts[2] == "trips" {
-		if _, err := uuid.Parse(parts[3]); err == nil {
-			return "/api/v1/trips/{tripId}"
-		}
+		return "/api/v1/trips/{tripId}"
 	}
 
 	if len(parts) == 5 &&
@@ -78,9 +73,7 @@ func routePattern(path string) string {
 		parts[1] == "v1" &&
 		parts[2] == "trips" &&
 		parts[4] == "finish" {
-		if _, err := uuid.Parse(parts[3]); err == nil {
-			return "/api/v1/trips/{tripId}/finish"
-		}
+		return "/api/v1/trips/{tripId}/finish"
 	}
 
 	return path

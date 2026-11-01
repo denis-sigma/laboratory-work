@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -33,5 +34,13 @@ func TestRecover(t *testing.T) {
 			recorder.Code,
 			http.StatusInternalServerError,
 		)
+	}
+
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want %q", contentType, "application/problem+json")
+	}
+
+	if body := recorder.Body.String(); !strings.Contains(body, `"code":"internal_error"`) {
+		t.Fatalf("body = %q, want internal_error", body)
 	}
 }

@@ -236,6 +236,55 @@ func TestHandlerCreateTripInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestHandlerCreateTripRejectsIncompleteBody(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := NewMockTripService(ctrl)
+	handler := NewHandler(nil, 0, service)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/trips",
+		strings.NewReader(`{
+			"user_id": "5cb72c04-7650-45c9-a79b-bcdba0631e0c",
+			"driver_id": "8860b315-ec86-42eb-a17c-7c163d721ff5"
+		}`),
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.CreateTrip(recorder, request, api.CreateTripParams{})
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandlerCreateTripRejectsTrailingJSON(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := NewMockTripService(ctrl)
+	handler := NewHandler(nil, 0, service)
+
+	requestBody := `{
+		"user_id": "5cb72c04-7650-45c9-a79b-bcdba0631e0c",
+		"driver_id": "8860b315-ec86-42eb-a17c-7c163d721ff5",
+		"start_point": {"latitude": 59.9398, "longitude": 30.3146},
+		"end_point": {"latitude": 59.9290, "longitude": 30.3626},
+		"price": 1450
+	} {}`
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/trips",
+		strings.NewReader(requestBody),
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.CreateTrip(recorder, request, api.CreateTripParams{})
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}
+
 func TestHandlerGetTripNotFound(t *testing.T) {
 	ctrl := gomock.NewController(t)
 

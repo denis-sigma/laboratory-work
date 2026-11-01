@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
@@ -66,6 +65,7 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 		pool.Close()
 		return nil, err
 	}
+	contextLogger := telemetry.NewContextLogger(logger)
 
 	tripRepository := repositorytrip.NewPostgresTripRepository(
 		pool,
@@ -76,6 +76,7 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 		tripRepository,
 		txManager,
 		tripMetrics,
+		contextLogger,
 	)
 
 	handler := httptransport.NewHandler(
@@ -131,9 +132,7 @@ func routePattern(path string) string {
 		parts[0] == "api" &&
 		parts[1] == "v1" &&
 		parts[2] == "trips" {
-		if _, err := uuid.Parse(parts[3]); err == nil {
-			return "/api/v1/trips/{tripId}"
-		}
+		return "/api/v1/trips/{tripId}"
 	}
 
 	if len(parts) == 5 &&
@@ -141,9 +140,7 @@ func routePattern(path string) string {
 		parts[1] == "v1" &&
 		parts[2] == "trips" &&
 		parts[4] == "finish" {
-		if _, err := uuid.Parse(parts[3]); err == nil {
-			return "/api/v1/trips/{tripId}/finish"
-		}
+		return "/api/v1/trips/{tripId}/finish"
 	}
 
 	return path
