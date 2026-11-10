@@ -43,3 +43,80 @@ go mod init github.com/<ваш-логин>/<ваш-репозиторий>
 Форки видны всем, включая ваши. Смотреть чужие решения, пока идёт курс, —
 плохая идея: одинаковый код виден сразу, а разбираться на защите придётся
 самому.
+
+## Лабораторная работа 1
+
+### Требования
+
+- Go 1.27+
+- Docker Desktop
+- WSL2 Ubuntu
+- tripgoctl
+
+### Запуск окружения
+
+```bash
+tripgoctl cluster start
+tripgoctl environment start
+tripgoctl connect
+```
+
+### Миграции
+
+```bash
+make migrate
+```
+
+### Запуск сервиса
+
+```bash
+make run
+```
+
+Сервис запускается на адресе из `HTTP_ADDR`.
+
+### Проверка
+
+```bash
+curl http://localhost:8080/health
+curl http://localhost:8080/ready
+```
+
+### Тесты
+
+```bash
+make test
+```
+
+### Генерация API
+
+```bash
+make generate
+```
+
+### Переменные окружения
+
+Настройки описаны в `.env.example`.
+
+Настоящий `.env` создаётся локальным окружением и в Git не добавляется.
+
+### Решения
+
+- Для транзакций выбран уровень изоляции `ReadCommitted`: для операций этой
+  работы достаточно видеть только зафиксированные данные, а PostgreSQL
+  блокирует конфликтующие изменения строк.
+- `TxManager` открывает транзакцию и кладёт её в `context.Context`. Репозитории
+  берут исполнителя запросов из контекста: при наличии транзакции используют её,
+  иначе работают через пул соединений.
+- Создание поездки и запись первого перехода статуса выполняются внутри одной
+  транзакции. Ошибка любой вставки приводит к откату обеих операций.
+- Запрет двух активных поездок одного водителя обеспечивается частичным
+  уникальным индексом `trips_active_driver_uidx` по `driver_id` для строк со
+  статусом `active`. Ошибка PostgreSQL `23505` преобразуется в `driver_busy`.
+
+Для запуска в `.env` должны быть заданы `HTTP_ADDR`, `LOG_LEVEL`,
+`SHUTDOWN_TIMEOUT`, `DATABASE_URL`, `DATABASE_MAX_CONNS`, `DATABASE_MIN_CONNS`,
+`DATABASE_MAX_CONN_LIFETIME`, `DATABASE_CONNECT_TIMEOUT`,
+`DATABASE_QUERY_TIMEOUT`, а также таймауты HTTP-сервера:
+`HTTP_READ_TIMEOUT`, `HTTP_READ_HEADER_TIMEOUT`, `HTTP_WRITE_TIMEOUT` и
+`HTTP_IDLE_TIMEOUT`.
