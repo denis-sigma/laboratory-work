@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"net/http"
@@ -42,5 +43,29 @@ func TestRecover(t *testing.T) {
 
 	if body := recorder.Body.String(); !strings.Contains(body, `"code":"internal_error"`) {
 		t.Fatalf("body = %q, want internal_error", body)
+	}
+}
+
+func TestMiddlewareChainFinishesLoggingOnPanic(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	metrics, err := Metrics()
+	if err != nil {
+		t.Fatalf("создание metrics middleware: %v", err)
+	}
+
+	panicHandler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("test panic")
+	})
+	handler := Recover(logger)(Logging(logger)(metrics(panicHandler)))
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/unknown/one", nil))
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	if !strings.Contains(logs.String(), "status=500") {
+		t.Errorf("logs = %q, want final status 500", logs.String())
 	}
 }

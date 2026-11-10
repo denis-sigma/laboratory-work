@@ -93,6 +93,26 @@ func TestServiceCreateRepositoryError(t *testing.T) {
 	}
 }
 
+func TestServiceCreateDriverBusy(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	repository := NewMockTripRepository(ctrl)
+	txManager := NewMockTxManager(ctrl)
+	service := NewService(repository, txManager, nil)
+
+	repository.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrDriverBusy)
+	txManager.EXPECT().Do(gomock.Any(), gomock.Any()).DoAndReturn(func(
+		ctx context.Context,
+		fn func(context.Context) error,
+	) error {
+		return fn(ctx)
+	})
+
+	_, err := service.Create(context.Background(), CreateTripInput{})
+	if !errors.Is(err, domain.ErrDriverBusy) {
+		t.Fatalf("получена ошибка %v, ожидалась %v", err, domain.ErrDriverBusy)
+	}
+}
+
 func TestServiceFinish(t *testing.T) {
 	ctrl := gomock.NewController(t)
 
@@ -161,5 +181,42 @@ func TestServiceGetByID(t *testing.T) {
 
 	if result.Status != expectedTrip.Status {
 		t.Errorf("Status = %s, want %s", result.Status, expectedTrip.Status)
+	}
+}
+
+func TestServiceGetByIDError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	repository := NewMockTripRepository(ctrl)
+	service := NewService(repository, NewMockTxManager(ctrl), nil)
+	wantErr := errors.New("ошибка чтения поездки")
+	tripID := uuid.New()
+
+	repository.EXPECT().GetByID(gomock.Any(), tripID).Return(domain.Trip{}, wantErr)
+
+	_, err := service.GetByID(context.Background(), tripID)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("получена ошибка %v, ожидалась %v", err, wantErr)
+	}
+}
+
+func TestServiceFinishError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	repository := NewMockTripRepository(ctrl)
+	txManager := NewMockTxManager(ctrl)
+	service := NewService(repository, txManager, nil)
+	wantErr := errors.New("ошибка завершения поездки")
+	tripID := uuid.New()
+
+	repository.EXPECT().Finish(gomock.Any(), tripID, gomock.Any()).Return(domain.Trip{}, wantErr)
+	txManager.EXPECT().Do(gomock.Any(), gomock.Any()).DoAndReturn(func(
+		ctx context.Context,
+		fn func(context.Context) error,
+	) error {
+		return fn(ctx)
+	})
+
+	_, err := service.Finish(context.Background(), tripID)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("получена ошибка %v, ожидалась %v", err, wantErr)
 	}
 }

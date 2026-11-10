@@ -10,11 +10,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	domain "github.com/denis-sigma/laboratory-work/internal/domain/trip"
 	"github.com/denis-sigma/laboratory-work/internal/generated"
 	"github.com/denis-sigma/laboratory-work/internal/transport/http/domainerror"
 	usecase "github.com/denis-sigma/laboratory-work/internal/usecase/trip"
-	"github.com/google/uuid"
 )
 
 type Handler struct {

@@ -1,6 +1,7 @@
 package httptransport
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -344,3 +345,57 @@ func TestHandlerFinishTripCompleted(t *testing.T) {
 		t.Errorf("Content-Type = %q, want %q", contentType, "application/problem+json")
 	}
 }
+
+func TestHandlerCreateTripDriverBusy(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := NewMockTripService(ctrl)
+	handler := NewHandler(nil, 0, service)
+
+	service.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.Trip{}, domain.ErrDriverBusy)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/trips", strings.NewReader(validTripJSON))
+	recorder := httptest.NewRecorder()
+
+	handler.CreateTrip(recorder, request, api.CreateTripParams{})
+
+	assertProblem(t, recorder, http.StatusConflict, "driver_busy", "")
+}
+
+func TestHandlerCreateTripInternalError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := NewMockTripService(ctrl)
+	handler := NewHandler(nil, 0, service)
+	wantErr := errors.New("database password leaked")
+
+	service.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.Trip{}, wantErr)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/trips", strings.NewReader(validTripJSON))
+	recorder := httptest.NewRecorder()
+
+	handler.CreateTrip(recorder, request, api.CreateTripParams{})
+
+	assertProblem(t, recorder, http.StatusInternalServerError, "internal_error", "database password leaked")
+}
+
+func assertProblem(t *testing.T, recorder *httptest.ResponseRecorder, status int, code, forbidden string) {
+	t.Helper()
+	if recorder.Code != status {
+		t.Errorf("status = %d, want %d", recorder.Code, status)
+	}
+	if contentType := recorder.Header().Get("Content-Type"); contentType != problemContentType {
+		t.Errorf("Content-Type = %q, want %q", contentType, problemContentType)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"code":"`+code+`"`) {
+		t.Errorf("body = %q, want code %q", body, code)
+	}
+	if forbidden != "" && strings.Contains(body, forbidden) {
+		t.Errorf("body = %q, must not contain internal error", body)
+	}
+}
+
+const validTripJSON = `{
+	"user_id": "5cb72c04-7650-45c9-a79b-bcdba0631e0c",
+	"driver_id": "8860b315-ec86-42eb-a17c-7c163d721ff5",
+	"start_point": {"latitude": 59.9398, "longitude": 30.3146},
+	"end_point": {"latitude": 59.9290, "longitude": 30.3626},
+	"price": 1450
+}`

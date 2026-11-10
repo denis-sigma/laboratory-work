@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -110,7 +109,7 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 			_ string,
 			r *http.Request,
 		) string {
-			return r.Method + " " + routePattern(r.URL.Path)
+			return r.Method + " " + httptransport.RoutePattern(r.URL.Path)
 		}),
 	)
 
@@ -123,25 +122,4 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 		TracerShutdown: tracerShutdown,
 		MeterShutdown:  meterShutdown,
 	}, nil
-}
-
-func routePattern(path string) string {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-
-	if len(parts) == 4 &&
-		parts[0] == "api" &&
-		parts[1] == "v1" &&
-		parts[2] == "trips" {
-		return "/api/v1/trips/{tripId}"
-	}
-
-	if len(parts) == 5 &&
-		parts[0] == "api" &&
-		parts[1] == "v1" &&
-		parts[2] == "trips" &&
-		parts[4] == "finish" {
-		return "/api/v1/trips/{tripId}/finish"
-	}
-
-	return path
 }

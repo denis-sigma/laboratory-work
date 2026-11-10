@@ -2,12 +2,13 @@ package middleware
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	httptransport "github.com/denis-sigma/laboratory-work/internal/transport/http"
 )
 
 func Metrics() (func(http.Handler) http.Handler, error) {
@@ -32,7 +33,7 @@ func Metrics() (func(http.Handler) http.Handler, error) {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			route := routePattern(r.URL.Path)
+			route := httptransport.RoutePattern(r.URL.Path)
 
 			attributes := metric.WithAttributes(
 				attribute.String("http.request.method", r.Method),
@@ -56,25 +57,4 @@ func Metrics() (func(http.Handler) http.Handler, error) {
 			next.ServeHTTP(writer, r)
 		})
 	}, nil
-}
-
-func routePattern(path string) string {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-
-	if len(parts) == 4 &&
-		parts[0] == "api" &&
-		parts[1] == "v1" &&
-		parts[2] == "trips" {
-		return "/api/v1/trips/{tripId}"
-	}
-
-	if len(parts) == 5 &&
-		parts[0] == "api" &&
-		parts[1] == "v1" &&
-		parts[2] == "trips" &&
-		parts[4] == "finish" {
-		return "/api/v1/trips/{tripId}/finish"
-	}
-
-	return path
 }
