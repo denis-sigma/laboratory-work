@@ -122,6 +122,9 @@ func parseDurationEnv(name string) (time.Duration, error) {
 	if err != nil {
 		return 0, fmt.Errorf("неверная продолжительность в %s: %w", name, err)
 	}
+	if duration <= 0 {
+		return 0, fmt.Errorf("продолжительность в %s должна быть больше нуля", name)
+	}
 
 	return duration, nil
 }
