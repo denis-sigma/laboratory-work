@@ -199,6 +199,12 @@ func (r *PostgresTripRepository) Finish(
 		if errors.Is(err, domain.ErrTripNotFound) {
 			return domain.Trip{}, domain.ErrTripNotFound
 		}
+		if err != nil {
+			return trip.Trip{}, fmt.Errorf(
+				"проверка поездки после завершения: %w",
+				err,
+			)
+		}
 
 		return domain.Trip{}, domain.ErrTripCompleted
 	}
