@@ -11,32 +11,33 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
+	domain "github.com/denis-sigma/laboratory-work/internal/domain/trip"
 	"github.com/denis-sigma/laboratory-work/internal/generated"
-	"github.com/denis-sigma/laboratory-work/internal/trip"
+	"github.com/denis-sigma/laboratory-work/internal/transport/http/domainerror"
+	usecase "github.com/denis-sigma/laboratory-work/internal/usecase/trip"
 )
 
 type Handler struct {
 	api.Unimplemented
-	pool         *pgxpool.Pool
+	readiness    Readiness
 	queryTimeout time.Duration
-	service      *trip.Service
+	service      TripService
 }
 
 func NewHandler(
-	pool *pgxpool.Pool,
+	readiness Readiness,
 	queryTimeout time.Duration,
-	service *trip.Service,
+	service TripService,
 ) *Handler {
 	return &Handler{
-		pool:         pool,
+		readiness:    readiness,
 		queryTimeout: queryTimeout,
 		service:      service,
 	}
 }
 
-func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Health(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -52,7 +53,7 @@ func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 	status := api.Ok
 	httpStatus := http.StatusOK
 
-	if err := h.pool.Ping(ctx); err != nil {
+	if err := h.readiness.Ping(ctx); err != nil {
 		status = api.Unavailable
 		httpStatus = http.StatusServiceUnavailable
 	}
@@ -68,7 +69,7 @@ func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateTrip(
 	w http.ResponseWriter,
 	r *http.Request,
-	params api.CreateTripParams,
+	_ api.CreateTripParams,
 ) {
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -122,14 +123,14 @@ func (h *Handler) CreateTrip(
 
 	result, err := h.service.Create(
 		r.Context(),
-		trip.CreateTripInput{
+		usecase.CreateTripInput{
 			UserID:   body.UserId,
 			DriverID: body.DriverId,
-			StartPoint: trip.Coordinates{
+			StartPoint: domain.Coordinates{
 				Latitude:  body.StartPoint.Latitude,
 				Longitude: body.StartPoint.Longitude,
 			},
-			EndPoint: trip.Coordinates{
+			EndPoint: domain.Coordinates{
 				Latitude:  body.EndPoint.Latitude,
 				Longitude: body.EndPoint.Longitude,
 			},
@@ -137,26 +138,7 @@ func (h *Handler) CreateTrip(
 		},
 	)
 	if err != nil {
-		if errors.Is(err, trip.ErrDriverBusy) {
-			writeProblem(
-				w,
-				r,
-				http.StatusConflict,
-				"driver_busy",
-				"Водитель занят",
-				"У водителя уже есть активная поездка",
-			)
-			return
-		}
-
-		writeProblem(
-			w,
-			r,
-			http.StatusInternalServerError,
-			"internal_error",
-			"Внутренняя ошибка",
-			"Не удалось создать поездку",
-		)
+		writeDomainError(w, r, err)
 		return
 	}
 
@@ -187,7 +169,7 @@ func (h *Handler) CreateTrip(
 func writeProblem(
 	w http.ResponseWriter,
 	r *http.Request,
-	status int,
+	status int32,
 	code string,
 	title string,
 	detail string,
@@ -195,16 +177,33 @@ func writeProblem(
 	instance := r.URL.Path
 
 	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(status)
+	w.WriteHeader(int(status))
 
 	_ = json.NewEncoder(w).Encode(api.Problem{
 		Type:     "https://tripgo.example/problems/" + code,
 		Title:    title,
-		Status:   int32(status),
+		Status:   status,
 		Detail:   &detail,
 		Instance: &instance,
 		Code:     code,
 	})
+}
+
+func writeDomainError(
+	w http.ResponseWriter,
+	r *http.Request,
+	err error,
+) {
+	details := domainerror.Map(err)
+
+	writeProblem(
+		w,
+		r,
+		details.Status,
+		details.Code,
+		details.Title,
+		details.Detail,
+	)
 }
 
 func (h *Handler) GetTrip(
@@ -214,26 +213,7 @@ func (h *Handler) GetTrip(
 ) {
 	result, err := h.service.GetByID(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, trip.ErrTripNotFound) {
-			writeProblem(
-				w,
-				r,
-				http.StatusNotFound,
-				"trip_not_found",
-				"Поездка не найдена",
-				"Поездка с указанным идентификатором не существует",
-			)
-			return
-		}
-
-		writeProblem(
-			w,
-			r,
-			http.StatusInternalServerError,
-			"internal_error",
-			"Внутренняя ошибка",
-			"Не удалось получить поездку",
-		)
+		writeDomainError(w, r, err)
 		return
 	}
 
@@ -268,38 +248,7 @@ func (h *Handler) FinishTrip(
 ) {
 	result, err := h.service.Finish(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, trip.ErrTripNotFound) {
-			writeProblem(
-				w,
-				r,
-				http.StatusNotFound,
-				"trip_not_found",
-				"Поездка не найдена",
-				"Поездка с указанным идентификатором не существует",
-			)
-			return
-		}
-
-		if errors.Is(err, trip.ErrTripCompleted) {
-			writeProblem(
-				w,
-				r,
-				http.StatusConflict,
-				"trip_completed",
-				"Поездка уже завершена",
-				"Нельзя повторно завершить поездку",
-			)
-			return
-		}
-
-		writeProblem(
-			w,
-			r,
-			http.StatusInternalServerError,
-			"internal_error",
-			"Внутренняя ошибка",
-			"Не удалось завершить поездку",
-		)
+		writeDomainError(w, r, err)
 		return
 	}
 

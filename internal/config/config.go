@@ -12,6 +12,7 @@ type Config struct {
 	Database        DatabaseConfig
 	LogLevel        string
 	ShutdownTimeout time.Duration
+	OTel            OTelConfig
 }
 
 type HTTPConfig struct {
@@ -29,6 +30,11 @@ type DatabaseConfig struct {
 	MaxConnLifetime time.Duration
 	ConnectTimeout  time.Duration
 	QueryTimeout    time.Duration
+}
+
+type OTelConfig struct {
+	ServiceName string
+	Endpoint    string
 }
 
 func Load() (Config, error) {
@@ -51,6 +57,16 @@ func Load() (Config, error) {
 	}
 
 	cfg.ShutdownTimeout, err = parseDurationEnv("SHUTDOWN_TIMEOUT")
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg.OTel.ServiceName, err = requiredEnv("OTEL_SERVICE_NAME")
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg.OTel.Endpoint, err = requiredEnv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	if err != nil {
 		return Config{}, err
 	}

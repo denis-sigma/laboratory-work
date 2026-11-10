@@ -2,17 +2,14 @@ package main
 
 import (
 	"context"
-	"github.com/denis-sigma/laboratory-work/internal/config"
-	"github.com/denis-sigma/laboratory-work/internal/database"
-	api "github.com/denis-sigma/laboratory-work/internal/generated"
-	"github.com/denis-sigma/laboratory-work/internal/repository"
-	httptransport "github.com/denis-sigma/laboratory-work/internal/transport/http"
-	"github.com/denis-sigma/laboratory-work/internal/trip"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/denis-sigma/laboratory-work/internal/config"
+	"github.com/denis-sigma/laboratory-work/internal/container"
 )
 
 func main() {
@@ -21,46 +18,40 @@ func main() {
 		log.Fatalf("загрузка конфигурации: %v", err)
 	}
 
-	log.Printf("HTTP сервер адрес: %s", cfg.HTTP.Addr)
 	ctx := context.Background()
 
-	pool, err := database.NewPool(ctx, cfg.Database)
+	app, err := container.New(ctx, cfg)
 	if err != nil {
-		log.Fatalf("подключение к бд: %v", err)
+		log.Fatalf("сборка приложения: %v", err)
 	}
-	defer pool.Close()
+	defer app.Pool.Close()
 
-	tripRepository := repository.NewPostgresTripRepository(
-		pool,
-		cfg.Database.QueryTimeout,
-	)
+	defer func() {
+		if err := app.TracerShutdown(context.Background()); err != nil {
+			app.Logger.Error("ошибка остановки OpenTelemetry", "error", err)
+		}
+	}()
 
-	txManager := database.NewTxManager(pool)
-	tripService := trip.NewService(tripRepository, txManager)
+	defer func() {
+		if err := app.MeterShutdown(context.Background()); err != nil {
+			app.Logger.Error("ошибка остановки OpenTelemetry metrics", "error", err)
+		}
+	}()
 
-	handler := httptransport.NewHandler(
-		pool,
-		cfg.Database.QueryTimeout,
-		tripService,
-	)
+	app.Logger.Info("HTTP сервер запускается", "addr", cfg.HTTP.Addr)
 
 	server := &http.Server{
-		Addr: cfg.HTTP.Addr,
-		Handler: api.HandlerWithOptions(
-			handler,
-			api.ChiServerOptions{
-				ErrorHandlerFunc: httptransport.OpenAPIErrorHandler,
-			},
-		),
+		Addr:              cfg.HTTP.Addr,
+		Handler:           app.Handler,
 		ReadTimeout:       cfg.HTTP.ReadTimeout,
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 		WriteTimeout:      cfg.HTTP.WriteTimeout,
 		IdleTimeout:       cfg.HTTP.IdleTimeout,
 	}
 
-	log.Printf("подключились к БД")
+	app.Logger.Info("подключились к БД")
 
-	log.Printf("HTTP сервер слушает на  %s", cfg.HTTP.Addr)
+	app.Logger.Info("HTTP сервер слушает", "addr", cfg.HTTP.Addr)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
@@ -74,7 +65,7 @@ func main() {
 
 	<-stop
 
-	log.Printf("получен сигнал остановки")
+	app.Logger.Info("получен сигнал остановки")
 
 	shutdownCtx, cancel := context.WithTimeout(
 		context.Background(),
@@ -83,8 +74,9 @@ func main() {
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("ошибка остановки HTTP-сервера: %v", err)
+		app.Logger.Error("ошибка остановки HTTP-сервера", "error", err)
+		return
 	}
 
-	log.Printf("HTTP-сервер остановлен")
+	app.Logger.Info("HTTP-сервер остановлен")
 }

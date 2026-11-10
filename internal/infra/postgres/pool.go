@@ -1,9 +1,13 @@
-package database
+package postgres
 
 import (
 	"context"
-	"github.com/denis-sigma/laboratory-work/internal/config"
+
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/denis-sigma/laboratory-work/internal/config"
 )
 
 func NewPool(ctx context.Context, cfg config.DatabaseConfig) (*pgxpool.Pool, error) {
@@ -15,6 +19,13 @@ func NewPool(ctx context.Context, cfg config.DatabaseConfig) (*pgxpool.Pool, err
 	poolConfig.MaxConns = cfg.MaxConns
 	poolConfig.MinConns = cfg.MinConns
 	poolConfig.MaxConnLifetime = cfg.MaxConnLifetime
+	poolConfig.ConnConfig.Tracer = otelpgx.NewTracer(
+		otelpgx.WithMetricOperationName(otelpgx.SQLOperationName),
+		otelpgx.WithMeterAttributes(
+			attribute.String("db.collection.name", "trips"),
+			attribute.String("error.type", "postgresql"),
+		),
+	)
 
 	connectCtx, cancel := context.WithTimeout(ctx, cfg.ConnectTimeout)
 	defer cancel()
