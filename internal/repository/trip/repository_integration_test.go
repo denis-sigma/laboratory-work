@@ -229,3 +229,49 @@ func TestPostgresTripRepositoryCreateRollsBackOnHistoryError(t *testing.T) {
 		)
 	}
 }
+
+func TestPostgresTripRepositoryPositionsAndStaleSelection(t *testing.T) {
+	pool := newIntegrationPool(t)
+	repository := NewPostgresTripRepository(pool, 3*time.Second)
+	txManager := transaction.NewTxManager(pool)
+	tripID := uuid.New()
+	current := domain.Trip{
+		ID: tripID, UserID: uuid.New(), DriverID: uuid.New(),
+		StartPoint: domain.Coordinates{Latitude: 59.9, Longitude: 30.3},
+		EndPoint:   domain.Coordinates{Latitude: 59.8, Longitude: 30.4},
+		Price:      100, Status: domain.TripStatusActive,
+		StartedAt: time.Now().UTC().Add(-2 * time.Hour),
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM trips WHERE id = $1", tripID)
+	})
+	if err := repository.Create(context.Background(), current); err != nil {
+		t.Fatal(err)
+	}
+
+	position := domain.Position{
+		TripID:      tripID,
+		Coordinates: domain.Coordinates{Latitude: 59.93, Longitude: 30.33},
+		RecordedAt:  time.Now().UTC(),
+	}
+	if err := txManager.Do(context.Background(), func(ctx context.Context) error {
+		_, err := repository.SavePosition(ctx, position)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	positions, err := repository.GetPositions(context.Background(), tripID)
+	if err != nil || len(positions) != 1 {
+		t.Fatalf("positions = %v, err = %v", positions, err)
+	}
+	stale, err := repository.FindTripsForPositionRequest(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range stale {
+		if item.ID == tripID {
+			t.Fatal("trip with a fresh position was selected as stale")
+		}
+	}
+}

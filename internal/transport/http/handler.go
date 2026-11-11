@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -20,20 +21,27 @@ import (
 
 type Handler struct {
 	api.Unimplemented
-	readiness    Readiness
-	queryTimeout time.Duration
-	service      TripService
+	readiness         Readiness
+	queryTimeout      time.Duration
+	service           TripService
+	positionCanceller PositionCanceller
 }
 
 func NewHandler(
 	readiness Readiness,
 	queryTimeout time.Duration,
 	service TripService,
+	positionCanceller ...PositionCanceller,
 ) *Handler {
+	var canceller PositionCanceller
+	if len(positionCanceller) > 0 {
+		canceller = positionCanceller[0]
+	}
 	return &Handler{
-		readiness:    readiness,
-		queryTimeout: queryTimeout,
-		service:      service,
+		readiness:         readiness,
+		queryTimeout:      queryTimeout,
+		service:           service,
+		positionCanceller: canceller,
 	}
 }
 
@@ -141,7 +149,6 @@ func (h *Handler) CreateTrip(
 		writeDomainError(w, r, err)
 		return
 	}
-
 	response := api.Trip{
 		Id:       result.ID,
 		UserId:   result.UserID,
@@ -350,4 +357,148 @@ func OpenAPIErrorHandler(
 		"Некорректный запрос",
 		err.Error(),
 	)
+}
+
+func (h *Handler) CreateTripPosition(
+	w http.ResponseWriter,
+	r *http.Request,
+	tripID api.TripId,
+) {
+	var body api.CreateTripPositionJSONRequestBody
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&body); err != nil {
+		writeProblem(
+			w,
+			r,
+			http.StatusBadRequest,
+			"invalid_request",
+			"Некорректный запрос",
+			"Тело запроса имеет неверный формат",
+		)
+		return
+	}
+
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		writeProblem(
+			w,
+			r,
+			http.StatusBadRequest,
+			"invalid_request",
+			"Некорректный запрос",
+			"После тела запроса обнаружены лишние данные",
+		)
+		return
+	}
+
+	if err := validatePosition(body); err != nil {
+		writeProblem(
+			w,
+			r,
+			http.StatusBadRequest,
+			"invalid_request",
+			"Некорректный запрос",
+			err.Error(),
+		)
+		return
+	}
+
+	result, err := h.service.SavePosition(
+		r.Context(),
+		usecase.SavePositionInput{
+			TripID: tripID,
+			Coordinates: domain.Coordinates{
+				Latitude:  body.Coordinates.Latitude,
+				Longitude: body.Coordinates.Longitude,
+			},
+			RecordedAt: body.RecordedAt,
+		},
+	)
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	if h.positionCanceller != nil {
+		h.positionCanceller.Cancel(tripID)
+	}
+
+	response := api.TripPosition{
+		Id:     result.ID,
+		TripId: result.TripID,
+		Coordinates: api.Coordinates{
+			Latitude:  result.Coordinates.Latitude,
+			Longitude: result.Coordinates.Longitude,
+		},
+		RecordedAt: result.RecordedAt,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (h *Handler) ListTripPositions(
+	w http.ResponseWriter,
+	r *http.Request,
+	tripID api.TripId,
+) {
+	positions, err := h.service.GetPositions(r.Context(), tripID)
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+
+	response := api.TripPositionsResponse{
+		Positions: make([]api.TripPosition, 0, len(positions)),
+	}
+
+	for _, position := range positions {
+		response.Positions = append(
+			response.Positions,
+			api.TripPosition{
+				Id:     position.ID,
+				TripId: position.TripID,
+				Coordinates: api.Coordinates{
+					Latitude:  position.Coordinates.Latitude,
+					Longitude: position.Coordinates.Longitude,
+				},
+				RecordedAt: position.RecordedAt,
+			},
+		)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func validatePosition(
+	body api.CreateTripPositionJSONRequestBody,
+) error {
+	latitude := body.Coordinates.Latitude
+	if math.IsNaN(latitude) || latitude < -90 || latitude > 90 {
+		return fmt.Errorf("широта должна быть от -90 до 90")
+	}
+
+	longitude := body.Coordinates.Longitude
+	if math.IsNaN(longitude) || longitude < -180 || longitude > 180 {
+		return fmt.Errorf("долгота должна быть от -180 до 180")
+	}
+
+	if body.RecordedAt.IsZero() {
+		return fmt.Errorf("recorded_at обязателен")
+	}
+
+	if body.RecordedAt.After(time.Now().Add(time.Minute)) {
+		return fmt.Errorf(
+			"recorded_at не может быть больше текущего времени более чем на минуту",
+		)
+	}
+
+	return nil
 }
