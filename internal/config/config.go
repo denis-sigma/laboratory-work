@@ -8,11 +8,17 @@ import (
 )
 
 type Config struct {
-	HTTP            HTTPConfig
-	Database        DatabaseConfig
-	LogLevel        string
-	ShutdownTimeout time.Duration
-	OTel            OTelConfig
+	HTTP                  HTTPConfig
+	Database              DatabaseConfig
+	LogLevel              string
+	ShutdownTimeout       time.Duration
+	OTel                  OTelConfig
+	PositionCheckInterval time.Duration
+	PositionStaleAfter    time.Duration
+	PositionWorkers       int
+	PositionQueueSize     int
+	PushHTTPURL           string
+	PushRequestTimeout    time.Duration
 }
 
 type HTTPConfig struct {
@@ -116,7 +122,54 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	cfg.PositionCheckInterval, err = parseDurationEnv("POSITION_CHECK_INTERVAL")
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg.PositionStaleAfter, err = parseDurationEnv("POSITION_STALE_AFTER")
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg.PositionWorkers, err = parseIntEnv("POSITION_WORKERS")
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg.PositionQueueSize, err = parseIntEnv("POSITION_QUEUE_SIZE")
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg.PushHTTPURL, err = requiredEnv("PUSH_HTTP_URL")
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg.PushRequestTimeout, err = parseDurationEnv("PUSH_REQUEST_TIMEOUT")
+	if err != nil {
+		return Config{}, err
+	}
+
 	return cfg, nil
+}
+
+func parseIntEnv(name string) (int, error) {
+	value, err := requiredEnv(name)
+	if err != nil {
+		return 0, err
+	}
+
+	number, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("неверное целое число в %s: %w", name, err)
+	}
+	if number <= 0 {
+		return 0, fmt.Errorf("число в %s должно быть больше нуля", name)
+	}
+
+	return number, nil
 }
 
 func requiredEnv(name string) (string, error) {

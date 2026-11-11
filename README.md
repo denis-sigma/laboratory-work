@@ -169,6 +169,23 @@ tripgo_trips_created_total
 tripgo_trips_completed_total
 ```
 
+### Лабораторная работа 3
+
+В проект добавлены координаты поездок, миграция `trip_positions`, атомарное сохранение
+с защитой от устаревших данных, HTTP-клиент Push Service, периодический scanner,
+bounded queue и worker pool фиксированного размера. Фоновые компоненты запускаются
+через контейнер и корректно останавливаются при завершении сервиса.
+
+Проверка:
+
+```bash
+make migrate
+go test ./...
+go test -race ./...
+make test-integration
+make lint
+```
+
 Инструменты observability доступны по адресам:
 
 ```text

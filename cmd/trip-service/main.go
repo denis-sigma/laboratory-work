@@ -64,6 +64,7 @@ func main() {
 	}()
 
 	<-stop
+	defer app.StopBackground()
 
 	app.Logger.Info("получен сигнал остановки")
 

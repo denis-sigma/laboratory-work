@@ -42,6 +42,12 @@ type CreateTripInput struct {
 	Price      int64
 }
 
+type SavePositionInput struct {
+	TripID      uuid.UUID
+	Coordinates domain.Coordinates
+	RecordedAt  time.Time
+}
+
 func (s *Service) Create(
 	ctx context.Context,
 	input CreateTripInput,
@@ -112,4 +118,51 @@ func (s *Service) Finish(
 	}
 
 	return result, nil
+}
+
+func (s *Service) SavePosition(
+	ctx context.Context,
+	input SavePositionInput,
+) (domain.Position, error) {
+	position := domain.Position{
+		TripID:      input.TripID,
+		Coordinates: input.Coordinates,
+		RecordedAt:  input.RecordedAt.UTC(),
+	}
+
+	var result domain.Position
+
+	err := s.txManager.Do(ctx, func(txCtx context.Context) error {
+		var err error
+
+		result, err = s.repository.SavePosition(txCtx, position)
+
+		return err
+	})
+	if err != nil {
+		return domain.Position{}, err
+	}
+	if s.metrics != nil {
+		s.metrics.PositionsSaved(ctx)
+	}
+
+	return result, nil
+}
+
+func (s *Service) GetPositions(
+	ctx context.Context,
+	tripID uuid.UUID,
+) ([]domain.Position, error) {
+	if _, err := s.repository.GetByID(ctx, tripID); err != nil {
+		return nil, err
+	}
+
+	return s.repository.GetPositions(ctx, tripID)
+}
+
+func (s *Service) FindTripsForPositionRequest(
+	ctx context.Context,
+	staleAfter time.Duration,
+) ([]domain.Trip, error) {
+	return s.repository.FindTripsForPositionRequest(ctx, staleAfter)
 }
