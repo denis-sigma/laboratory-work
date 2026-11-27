@@ -53,6 +53,34 @@ func TestPoolContinuesAfterGatewayError(t *testing.T) {
 	}
 }
 
+type blockingGateway struct {
+	started chan struct{}
+}
+
+func (g *blockingGateway) RequestPosition(ctx context.Context, _, _ uuid.UUID) error {
+	close(g.started)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestPoolStopCancelsInFlightRequestAndWaits(t *testing.T) {
+	queue := NewQueue(1)
+	gateway := &blockingGateway{started: make(chan struct{})}
+	pool := NewPool(queue, gateway, 1, time.Hour, nil)
+	pool.Start(context.Background())
+	queue.Enqueue(Task{TripID: uuid.New()})
+
+	select {
+	case <-gateway.started:
+	case <-time.After(time.Second):
+		t.Fatal("gateway request did not start")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	pool.Stop(shutdownCtx)
+}
+
 type testSource struct {
 	called chan struct{}
 }

@@ -25,6 +25,9 @@ type Pool struct {
 	logger         *slog.Logger
 	metrics        Metrics
 	group          sync.WaitGroup
+	workCtx        context.Context
+	workCancel     context.CancelFunc
+	stopOnce       sync.Once
 }
 
 func NewPool(
@@ -49,7 +52,12 @@ func NewPool(
 	}
 }
 
-func (p *Pool) Start() {
+func (p *Pool) Start(contexts ...context.Context) {
+	ctx := context.Background()
+	if len(contexts) > 0 && contexts[0] != nil {
+		ctx = contexts[0]
+	}
+	p.workCtx, p.workCancel = context.WithCancel(ctx)
 	for i := 0; i < p.workers; i++ {
 		p.group.Add(1)
 
@@ -60,23 +68,48 @@ func (p *Pool) Start() {
 	}
 }
 
-func (p *Pool) Stop() {
-	p.queue.Close()
-	p.group.Wait()
+func (p *Pool) Stop(contexts ...context.Context) {
+	ctx := context.Background()
+	if len(contexts) > 0 && contexts[0] != nil {
+		ctx = contexts[0]
+	}
+	p.stopOnce.Do(func() { p.queue.Close() })
+	done := make(chan struct{})
+	go func() {
+		p.group.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		if p.workCancel != nil {
+			p.workCancel()
+		}
+	case <-ctx.Done():
+		if p.workCancel != nil {
+			p.workCancel()
+		}
+		<-done
+	}
 }
 
 func (p *Pool) worker() {
 	for {
-		task, ok := p.queue.Dequeue()
+		task, ok := p.queue.Dequeue(p.workCtx)
 		if !ok {
 			return
 		}
+		if p.metrics != nil {
+			p.metrics.QueueSize(p.queue.Len())
+		}
 		if !p.queue.IsCurrent(task) {
+			if p.metrics != nil {
+				p.metrics.Requests("cancelled")
+			}
 			continue
 		}
 
 		requestCtx, cancel := context.WithTimeout(
-			context.Background(),
+			p.workCtx,
 			p.requestTimeout,
 		)
 		started := time.Now()
@@ -91,18 +124,14 @@ func (p *Pool) worker() {
 		)
 
 		cancel()
+		result := requestResult(err, p.workCtx)
 		if p.metrics != nil {
 			p.metrics.ActiveWorkers(-1)
-			p.metrics.RequestDuration(time.Since(started))
+			p.metrics.RequestDuration(time.Since(started), result)
 		}
 		p.queue.DoneTask(task)
 		if p.metrics != nil {
-			if err != nil {
-				p.metrics.Requests("error")
-			} else {
-				p.metrics.Requests("success")
-			}
-			p.metrics.QueueSize(p.queue.Len())
+			p.metrics.Requests(result)
 		}
 
 		if err != nil && p.logger != nil {
@@ -113,4 +142,14 @@ func (p *Pool) worker() {
 			)
 		}
 	}
+}
+
+func requestResult(err error, workCtx context.Context) string {
+	if err == nil {
+		return "success"
+	}
+	if workCtx != nil && workCtx.Err() != nil {
+		return "cancelled"
+	}
+	return "error"
 }

@@ -194,11 +194,15 @@ func (r *PostgresTripRepository) SavePosition(
 		)
 	}
 
-	if _, err := executor.Exec(queryCtx, updateQuery, updateArgs...); err != nil {
+	result, err := executor.Exec(queryCtx, updateQuery, updateArgs...)
+	if err != nil {
 		return domain.Position{}, fmt.Errorf(
 			"обновление времени последней координаты: %w",
 			err,
 		)
+	}
+	if result.RowsAffected() == 0 {
+		return domain.Position{}, domain.ErrTripCompleted
 	}
 
 	return position, nil
@@ -225,6 +229,7 @@ func (r *PostgresTripRepository) GetByID(
 			statusColumn,
 			"started_at",
 			"finished_at",
+			"last_position_at",
 		).
 		From("trips").
 		Where(squirrel.Eq{"id": id}).
@@ -247,6 +252,7 @@ func (r *PostgresTripRepository) GetByID(
 		&result.Status,
 		&result.StartedAt,
 		&result.FinishedAt,
+		&result.LastPositionAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -419,6 +425,7 @@ func (r *PostgresTripRepository) FindTripsForPositionRequest(
 			statusColumn,
 			"started_at",
 			"finished_at",
+			"last_position_at",
 		).
 		From("trips").
 		Where(squirrel.Expr(
@@ -461,6 +468,7 @@ func (r *PostgresTripRepository) FindTripsForPositionRequest(
 			&current.Status,
 			&current.StartedAt,
 			&current.FinishedAt,
+			&current.LastPositionAt,
 		); err != nil {
 			return nil, fmt.Errorf(
 				"чтение устаревшей поездки: %w",

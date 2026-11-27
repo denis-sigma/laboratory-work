@@ -28,7 +28,7 @@ type Container struct {
 	Logger         *slog.Logger
 	TracerShutdown func(context.Context) error
 	MeterShutdown  func(context.Context) error
-	StopBackground func()
+	StopBackground func(context.Context)
 }
 
 func New(ctx context.Context, cfg config.Config) (*Container, error) {
@@ -91,14 +91,14 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 	}
 	positionPool := positions.NewPool(positionQueue, pushClient, cfg.PositionWorkers, cfg.PushRequestTimeout, logger, positionMetrics)
 	positionScanner := positions.NewScanner(tripService, positionQueue, cfg.PositionCheckInterval, cfg.PositionStaleAfter, logger, positionMetrics)
-	backgroundCtx, cancelBackground := context.WithCancel(ctx)
+	scannerCtx, cancelScanner := context.WithCancel(ctx)
 	var backgroundGroup sync.WaitGroup
 	backgroundGroup.Add(1)
 	go func() {
 		defer backgroundGroup.Done()
-		positionScanner.Run(backgroundCtx)
+		positionScanner.Run(scannerCtx)
 	}()
-	positionPool.Start()
+	positionPool.Start(ctx)
 
 	handler := httptransport.NewHandler(
 		pool,
@@ -116,9 +116,9 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 
 	metricsMiddleware, err := middleware.Metrics()
 	if err != nil {
-		cancelBackground()
+		cancelScanner()
 		backgroundGroup.Wait()
-		positionPool.Stop()
+		positionPool.Stop(context.Background())
 		_ = meterShutdown(ctx)
 		_ = tracerShutdown(ctx)
 		pool.Close()
@@ -147,10 +147,10 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 		Logger:         logger,
 		TracerShutdown: tracerShutdown,
 		MeterShutdown:  meterShutdown,
-		StopBackground: func() {
-			cancelBackground()
+		StopBackground: func(shutdownCtx context.Context) {
+			cancelScanner()
 			backgroundGroup.Wait()
-			positionPool.Stop()
+			positionPool.Stop(shutdownCtx)
 		},
 	}, nil
 }

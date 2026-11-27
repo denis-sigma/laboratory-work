@@ -7,5 +7,5 @@ type Metrics interface {
 	QueueSize(size int)
 	ActiveWorkers(delta int)
 	Requests(result string)
-	RequestDuration(duration time.Duration)
+	RequestDuration(duration time.Duration, result string)
 }

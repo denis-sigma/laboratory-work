@@ -235,6 +235,8 @@ func TestPostgresTripRepositoryPositionsAndStaleSelection(t *testing.T) {
 	repository := NewPostgresTripRepository(pool, 3*time.Second)
 	txManager := transaction.NewTxManager(pool)
 	tripID := uuid.New()
+	staleTripID := uuid.New()
+	completedTripID := uuid.New()
 	current := domain.Trip{
 		ID: tripID, UserID: uuid.New(), DriverID: uuid.New(),
 		StartPoint: domain.Coordinates{Latitude: 59.9, Longitude: 30.3},
@@ -242,10 +244,25 @@ func TestPostgresTripRepositoryPositionsAndStaleSelection(t *testing.T) {
 		Price:      100, Status: domain.TripStatusActive,
 		StartedAt: time.Now().UTC().Add(-2 * time.Hour),
 	}
+	staleTrip := current
+	staleTrip.ID = staleTripID
+	staleTrip.DriverID = uuid.New()
+	completedTrip := current
+	completedTrip.ID = completedTripID
+	completedTrip.DriverID = uuid.New()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM trips WHERE id = $1", tripID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM trips WHERE id IN ($1, $2, $3)", tripID, staleTripID, completedTripID)
 	})
 	if err := repository.Create(context.Background(), current); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Create(context.Background(), staleTrip); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Create(context.Background(), completedTrip); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.Finish(context.Background(), completedTripID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -273,5 +290,20 @@ func TestPostgresTripRepositoryPositionsAndStaleSelection(t *testing.T) {
 		if item.ID == tripID {
 			t.Fatal("trip with a fresh position was selected as stale")
 		}
+		if item.ID == completedTripID {
+			t.Fatal("completed trip was selected as stale")
+		}
+	}
+	foundStale := false
+	for _, item := range stale {
+		if item.ID == staleTripID {
+			foundStale = true
+			if item.LastPositionAt != nil {
+				t.Fatal("stale trip without a position has LastPositionAt")
+			}
+		}
+	}
+	if !foundStale {
+		t.Fatal("old active trip without a position was not selected")
 	}
 }

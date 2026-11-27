@@ -1,6 +1,7 @@
 package positions
 
 import (
+	"context"
 	"sync"
 
 	"github.com/google/uuid"
@@ -55,13 +56,20 @@ func (q *Queue) Enqueue(task Task) QueueResult {
 	}
 }
 
-func (q *Queue) Dequeue() (Task, bool) {
-	task, ok := <-q.tasks
-	if !ok {
+func (q *Queue) Dequeue(contexts ...context.Context) (Task, bool) {
+	ctx := context.Background()
+	if len(contexts) > 0 && contexts[0] != nil {
+		ctx = contexts[0]
+	}
+	if ctx.Err() != nil {
 		return Task{}, false
 	}
-
-	return task, true
+	select {
+	case task, ok := <-q.tasks:
+		return task, ok
+	case <-ctx.Done():
+		return Task{}, false
+	}
 }
 
 func (q *Queue) Done(tripID uuid.UUID) {

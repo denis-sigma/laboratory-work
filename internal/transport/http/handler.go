@@ -161,9 +161,10 @@ func (h *Handler) CreateTrip(
 			Latitude:  result.EndPoint.Latitude,
 			Longitude: result.EndPoint.Longitude,
 		},
-		Price:     result.Price,
-		Status:    api.TripStatus(result.Status),
-		StartedAt: result.StartedAt,
+		Price:          result.Price,
+		Status:         api.TripStatus(result.Status),
+		StartedAt:      result.StartedAt,
+		LastPositionAt: result.LastPositionAt,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -236,10 +237,11 @@ func (h *Handler) GetTrip(
 			Latitude:  result.EndPoint.Latitude,
 			Longitude: result.EndPoint.Longitude,
 		},
-		Price:      result.Price,
-		Status:     api.TripStatus(result.Status),
-		StartedAt:  result.StartedAt,
-		FinishedAt: result.FinishedAt,
+		Price:          result.Price,
+		Status:         api.TripStatus(result.Status),
+		StartedAt:      result.StartedAt,
+		FinishedAt:     result.FinishedAt,
+		LastPositionAt: result.LastPositionAt,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -271,10 +273,11 @@ func (h *Handler) FinishTrip(
 			Latitude:  result.EndPoint.Latitude,
 			Longitude: result.EndPoint.Longitude,
 		},
-		Price:      result.Price,
-		Status:     api.TripStatus(result.Status),
-		StartedAt:  result.StartedAt,
-		FinishedAt: result.FinishedAt,
+		Price:          result.Price,
+		Status:         api.TripStatus(result.Status),
+		StartedAt:      result.StartedAt,
+		FinishedAt:     result.FinishedAt,
+		LastPositionAt: result.LastPositionAt,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -366,7 +369,40 @@ func (h *Handler) CreateTripPosition(
 ) {
 	var body api.CreateTripPositionJSONRequestBody
 
-	decoder := json.NewDecoder(r.Body)
+	payload, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeInvalidPositionRequest(w, r, "не удалось прочитать тело запроса")
+		return
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		writeInvalidPositionRequest(w, r, "тело запроса имеет неверный формат")
+		return
+	}
+	if err := requireJSONField(fields, "coordinates"); err != nil {
+		writeInvalidPositionRequest(w, r, err.Error())
+		return
+	}
+	var coordinates map[string]json.RawMessage
+	if err := json.Unmarshal(fields["coordinates"], &coordinates); err != nil {
+		writeInvalidPositionRequest(w, r, "coordinates должен быть объектом")
+		return
+	}
+	if err := requireJSONField(coordinates, "latitude"); err != nil {
+		writeInvalidPositionRequest(w, r, err.Error())
+		return
+	}
+	if err := requireJSONField(coordinates, "longitude"); err != nil {
+		writeInvalidPositionRequest(w, r, err.Error())
+		return
+	}
+	if err := requireJSONField(fields, "recorded_at"); err != nil {
+		writeInvalidPositionRequest(w, r, err.Error())
+		return
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(&body); err != nil {
@@ -439,6 +475,18 @@ func (h *Handler) CreateTripPosition(
 	w.WriteHeader(http.StatusCreated)
 
 	_ = json.NewEncoder(w).Encode(response)
+}
+
+func writeInvalidPositionRequest(w http.ResponseWriter, r *http.Request, detail string) {
+	writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Некорректный запрос", detail)
+}
+
+func requireJSONField(fields map[string]json.RawMessage, name string) error {
+	value, ok := fields[name]
+	if !ok || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		return fmt.Errorf("%s обязателен и не может быть null", name)
+	}
+	return nil
 }
 
 func (h *Handler) ListTripPositions(

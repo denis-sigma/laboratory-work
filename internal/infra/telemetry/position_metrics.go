@@ -73,8 +73,12 @@ func (m *PositionMetrics) Requests(result string) {
 	m.requests.Add(context.Background(), 1, metric.WithAttributes(attribute.String("result", result)))
 }
 
-func (m *PositionMetrics) RequestDuration(duration time.Duration) {
-	m.requestDuration.Record(context.Background(), duration.Seconds())
+func (m *PositionMetrics) RequestDuration(duration time.Duration, result string) {
+	m.requestDuration.Record(
+		context.Background(),
+		duration.Seconds(),
+		metric.WithAttributes(attribute.String("result", result)),
+	)
 }
 
 var _ positions.Metrics = (*PositionMetrics)(nil)
