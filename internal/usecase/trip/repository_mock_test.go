@@ -57,6 +57,21 @@ func (mr *MockTripRepositoryMockRecorder) Create(ctx, arg1 any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockTripRepository)(nil).Create), ctx, arg1)
 }
 
+// FindTripsForPositionRequest mocks base method.
+func (m *MockTripRepository) FindTripsForPositionRequest(ctx context.Context, staleAfter time.Duration) ([]trip.Trip, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FindTripsForPositionRequest", ctx, staleAfter)
+	ret0, _ := ret[0].([]trip.Trip)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FindTripsForPositionRequest indicates an expected call of FindTripsForPositionRequest.
+func (mr *MockTripRepositoryMockRecorder) FindTripsForPositionRequest(ctx, staleAfter any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindTripsForPositionRequest", reflect.TypeOf((*MockTripRepository)(nil).FindTripsForPositionRequest), ctx, staleAfter)
+}
+
 // Finish mocks base method.
 func (m *MockTripRepository) Finish(ctx context.Context, id uuid.UUID, finishedAt time.Time) (trip.Trip, error) {
 	m.ctrl.T.Helper()
@@ -85,4 +100,34 @@ func (m *MockTripRepository) GetByID(ctx context.Context, id uuid.UUID) (trip.Tr
 func (mr *MockTripRepositoryMockRecorder) GetByID(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByID", reflect.TypeOf((*MockTripRepository)(nil).GetByID), ctx, id)
+}
+
+// GetPositions mocks base method.
+func (m *MockTripRepository) GetPositions(ctx context.Context, tripID uuid.UUID) ([]trip.Position, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPositions", ctx, tripID)
+	ret0, _ := ret[0].([]trip.Position)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPositions indicates an expected call of GetPositions.
+func (mr *MockTripRepositoryMockRecorder) GetPositions(ctx, tripID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPositions", reflect.TypeOf((*MockTripRepository)(nil).GetPositions), ctx, tripID)
+}
+
+// SavePosition mocks base method.
+func (m *MockTripRepository) SavePosition(ctx context.Context, position trip.Position) (trip.Position, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SavePosition", ctx, position)
+	ret0, _ := ret[0].(trip.Position)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SavePosition indicates an expected call of SavePosition.
+func (mr *MockTripRepositoryMockRecorder) SavePosition(ctx, position any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SavePosition", reflect.TypeOf((*MockTripRepository)(nil).SavePosition), ctx, position)
 }

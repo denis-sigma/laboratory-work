@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
@@ -373,6 +374,67 @@ func TestHandlerCreateTripInternalError(t *testing.T) {
 	handler.CreateTrip(recorder, request, api.CreateTripParams{})
 
 	assertProblem(t, recorder, http.StatusInternalServerError, "internal_error", "database password leaked")
+}
+
+func TestHandlerCreateTripPositionRejectsMissingOrNullCoordinates(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "missing coordinates", body: `{"recorded_at":"2026-01-01T00:00:00Z"}`},
+		{name: "null coordinates", body: `{"coordinates":null,"recorded_at":"2026-01-01T00:00:00Z"}`},
+		{name: "empty coordinates", body: `{"coordinates":{},"recorded_at":"2026-01-01T00:00:00Z"}`},
+		{name: "missing latitude", body: `{"coordinates":{"longitude":0},"recorded_at":"2026-01-01T00:00:00Z"}`},
+		{name: "null longitude", body: `{"coordinates":{"latitude":0,"longitude":null},"recorded_at":"2026-01-01T00:00:00Z"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			service := NewMockTripService(ctrl)
+			handler := NewHandler(nil, 0, service)
+			request := httptest.NewRequest(
+				http.MethodPost,
+				"/api/v1/trips/"+uuid.NewString()+"/positions",
+				strings.NewReader(test.body),
+			)
+			recorder := httptest.NewRecorder()
+
+			handler.CreateTripPosition(recorder, request, uuid.New())
+
+			assertProblem(t, recorder, http.StatusBadRequest, "invalid_request", "")
+		})
+	}
+}
+
+func TestHandlerCreateTripPositionAcceptsZeroCoordinates(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := NewMockTripService(ctrl)
+	handler := NewHandler(nil, 0, service)
+	tripID := uuid.New()
+
+	service.EXPECT().SavePosition(gomock.Any(), usecase.SavePositionInput{
+		TripID: tripID,
+		Coordinates: domain.Coordinates{
+			Latitude:  0,
+			Longitude: 0,
+		},
+		RecordedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}).Return(domain.Position{
+		ID:     1,
+		TripID: tripID,
+	}, nil)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/trips/"+tripID.String()+"/positions",
+		strings.NewReader(`{"coordinates":{"latitude":0,"longitude":0},"recorded_at":"2026-01-01T00:00:00Z"}`),
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.CreateTripPosition(recorder, request, tripID)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusCreated)
+	}
 }
 
 func assertProblem(t *testing.T, recorder *httptest.ResponseRecorder, status int, code, forbidden string) {

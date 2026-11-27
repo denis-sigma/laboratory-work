@@ -41,6 +41,15 @@ func Map(err error) Details {
 		}
 	}
 
+	if errors.Is(err, trip.ErrInvalidPosition) {
+		return Details{
+			400,
+			"invalid_request",
+			"Некорректный запрос",
+			"Координаты имеют неверный формат или значение",
+		}
+	}
+
 	return Details{
 		500,
 		"internal_error",

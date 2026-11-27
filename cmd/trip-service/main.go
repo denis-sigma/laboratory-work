@@ -75,8 +75,8 @@ func main() {
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		app.Logger.Error("ошибка остановки HTTP-сервера", "error", err)
-		return
 	}
+	app.StopBackground(shutdownCtx)
 
 	app.Logger.Info("HTTP-сервер остановлен")
 }

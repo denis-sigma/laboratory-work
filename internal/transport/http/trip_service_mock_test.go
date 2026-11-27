@@ -19,6 +19,44 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
+// MockReadiness is a mock of Readiness interface.
+type MockReadiness struct {
+	ctrl     *gomock.Controller
+	recorder *MockReadinessMockRecorder
+	isgomock struct{}
+}
+
+// MockReadinessMockRecorder is the mock recorder for MockReadiness.
+type MockReadinessMockRecorder struct {
+	mock *MockReadiness
+}
+
+// NewMockReadiness creates a new mock instance.
+func NewMockReadiness(ctrl *gomock.Controller) *MockReadiness {
+	mock := &MockReadiness{ctrl: ctrl}
+	mock.recorder = &MockReadinessMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockReadiness) EXPECT() *MockReadinessMockRecorder {
+	return m.recorder
+}
+
+// Ping mocks base method.
+func (m *MockReadiness) Ping(arg0 context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Ping", arg0)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Ping indicates an expected call of Ping.
+func (mr *MockReadinessMockRecorder) Ping(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockReadiness)(nil).Ping), arg0)
+}
+
 // MockTripService is a mock of TripService interface.
 type MockTripService struct {
 	ctrl     *gomock.Controller
@@ -86,4 +124,34 @@ func (m *MockTripService) GetByID(ctx context.Context, id uuid.UUID) (trip.Trip,
 func (mr *MockTripServiceMockRecorder) GetByID(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByID", reflect.TypeOf((*MockTripService)(nil).GetByID), ctx, id)
+}
+
+// GetPositions mocks base method.
+func (m *MockTripService) GetPositions(ctx context.Context, tripID uuid.UUID) ([]trip.Position, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPositions", ctx, tripID)
+	ret0, _ := ret[0].([]trip.Position)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPositions indicates an expected call of GetPositions.
+func (mr *MockTripServiceMockRecorder) GetPositions(ctx, tripID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPositions", reflect.TypeOf((*MockTripService)(nil).GetPositions), ctx, tripID)
+}
+
+// SavePosition mocks base method.
+func (m *MockTripService) SavePosition(ctx context.Context, input trip0.SavePositionInput) (trip.Position, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SavePosition", ctx, input)
+	ret0, _ := ret[0].(trip.Position)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SavePosition indicates an expected call of SavePosition.
+func (mr *MockTripServiceMockRecorder) SavePosition(ctx, input any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SavePosition", reflect.TypeOf((*MockTripService)(nil).SavePosition), ctx, input)
 }
